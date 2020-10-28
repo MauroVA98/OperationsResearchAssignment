@@ -24,11 +24,11 @@ class Scheduler(object):
                      "Boeing 747-800I": {"cap": 410, "cat": "H"},
                      "Airbus A380-800": {"cap": 544, "cat": "H"}}
 
-        self.__schedule = {1: {"ac": "Boeing 777-300", "type": "INT", "ETA": self.get_dt(hour=10, minute=25),
-                               "ETD": self.get_dt(hour=15, minute=30), "PREF": [["B4", 5], ["B3", 10]]},
-                           2: {"ac": "Airbus A330-300", "type": "INT", "ETA": self.get_dt(hour=12, minute=25),
+        self.__schedule = {1: {"AC": "Boeing 777-300", "type": "INT", "ETA": self.get_dt(hour=10, minute=25),
+                               "ETD": self.get_dt(hour=15, minute=30), "PREF": {"ter": "A", "bay": 1, "val": 5}},
+                           2: {"AC": "Airbus A330-300", "type": "INT", "ETA": self.get_dt(hour=12, minute=25),
                                "ETD": self.get_dt(hour=14, minute=30)},
-                           3: {"ac": "Airbus A380-800", "type": "INT", "ETA": self.get_dt(hour=16, minute=25),
+                           3: {"AC": "Airbus A380-800", "type": "INT", "ETA": self.get_dt(hour=16, minute=25),
                                "ETD": self.get_dt(hour=17, minute=30)}}
 
         self.__turns, self.__lturns = self.pross_schedule()
@@ -40,22 +40,24 @@ class Scheduler(object):
         turns = self.__schedule.copy()
         lturns = defaultdict(dict)
         for flight in self.__schedule:
-            if self.__schedule[flight]["ETD"] - self.__schedule[flight]["ETA"] > self.__ttowing:
+            if self.__schedule[flight]["ETD"] - self.__schedule[flight]["ETA"] > self.__ttowing or \
+                    self.__schedule[flight].get("tow") == True:
                 lturns["FULL"][flight] = self.__schedule[flight].copy()
-                lturns["SPLIT"][str(flight)+"A"] = self.__schedule[flight].copy()
-                lturns["SPLIT"][str(flight)+"P"] = self.__schedule[flight].copy()
-                lturns["SPLIT"][str(flight)+"D"] = self.__schedule[flight].copy()
+                lturns["SPLIT"][str(flight) + "A"] = self.__schedule[flight].copy()
+                lturns["SPLIT"][str(flight) + "P"] = self.__schedule[flight].copy()
+                lturns["SPLIT"][str(flight) + "D"] = self.__schedule[flight].copy()
 
-                lturns["SPLIT"][str(flight)+"A"]["ETD"] = self.__schedule[flight]["ETA"] + timedelta(minutes=45)
-                lturns["SPLIT"][str(flight)+"D"]["ETA"] = self.__schedule[flight]["ETD"] - timedelta(minutes=45)
-                lturns["SPLIT"][str(flight)+"P"]["ETA"] = lturns["SPLIT"][str(flight)+"A"]["ETD"]
-                lturns["SPLIT"][str(flight)+"P"]["ETD"] = lturns["SPLIT"][str(flight)+"D"]["ETA"]
+                lturns["SPLIT"][str(flight) + "A"]["ETD"] = self.__schedule[flight]["ETA"] + timedelta(minutes=45)
+                lturns["SPLIT"][str(flight) + "D"]["ETA"] = self.__schedule[flight]["ETD"] - timedelta(minutes=45)
+                lturns["SPLIT"][str(flight) + "P"]["ETA"] = lturns["SPLIT"][str(flight) + "A"]["ETD"]
+                lturns["SPLIT"][str(flight) + "P"]["ETD"] = lturns["SPLIT"][str(flight) + "D"]["ETA"]
 
-                if isinstance(self.__schedule[flight]["PREF"][0], list):
-                    lturns["FULL"][flight]["PREF"] = self.__schedule[flight]["PREF"][0]
-                    lturns["SPLIT"][str(flight)+"A"]["PREF"] = self.__schedule[flight]["PREF"][0]
-                    lturns["SPLIT"][str(flight)+"D"]["PREF"] = self.__schedule[flight]["PREF"][1]
-                del lturns["SPLIT"][str(flight)+"P"]["PREF"]
+                if self.__schedule[flight].get("PREF"):
+                    del lturns["SPLIT"][str(flight) + "P"]["PREF"]
+                    # if isinstance(self.__schedule[flight]["PREF"], defaultdict(dict)):
+                    #     lturns["FULL"][flight]["PREF"] = self.__schedule[flight]["PREF"][0]
+                    #     lturns["SPLIT"][str(flight) + "A"]["PREF"] = self.__schedule[flight]["PREF"][0]
+                    #     lturns["SPLIT"][str(flight) + "D"]["PREF"] = self.__schedule[flight]["PREF"][1]
                 del turns[flight]
         return turns, lturns
 

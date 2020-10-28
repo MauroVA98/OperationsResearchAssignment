@@ -6,7 +6,7 @@ Authors: Mauro, Luke   2020
 from collections import defaultdict, ChainMap
 from pulp import LpProblem, LpMinimize, lpSum, LpInteger, LpVariable, LpStatus, value
 from math import ceil
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 
 from flight_schedule import Scheduler
 
@@ -14,6 +14,16 @@ from flight_schedule import Scheduler
 def cat_list(start: str, end: str):
     w = [chr(i) for i in range(ord(start), ord(end) + 1)]
     return w[::-1]
+
+def get_flightn(flights):
+    lst = []
+    for f in flights:
+        if isinstance(f, int):
+            n = f
+        else:
+            n = int(f[0])
+        lst.append(n)
+    return lst
 
 
 class LPSolver(object):
@@ -30,156 +40,178 @@ class LPSolver(object):
 
         # bay variables
         self.__terminals = ["A", "B"]  # A: domestic + continental terminal / B: international terminal
-        self.__nbays = [15, 10]
+        self.__nbays = {"A": 15, "B": 10}
         self.__ter_penalty = 100  # penalty multiplier for inappropriate terminal
+        self.__bdis = 30
 
-        self.__int_lbays = 2
-        self.__int_sbays = 6
-        self.__dom_lbays = 2
-        self.__dom_sbays = 8
+        self.__int_lbays = 4
+        self.__int_sbays = 4
+        self.__dom_lbays = 4
+        self.__dom_sbays = 6
 
-        # create bay data dictionary
-        self.__bays = self.get_bays(terminals=self.__terminals, nbays=self.__nbays)
+        self.__bays = defaultdict(dict)
+        self.__costs_turns = defaultdict(lambda: defaultdict(dict))
+        self.__const_adf = defaultdict(lambda: defaultdict(dict))
+        self.__tconf = []
+        self.__costs_tows = {}
 
         # create chain map of all turns
         self.__map_turns = ChainMap(self.__turns, self.__lturns["FULL"], self.__lturns["SPLIT"])
 
-        # get costs matrices for turns and tows for objective function
-        self.__costs_turns = self.get_costs_turns()
-        self.__costs_tows = self.get_costs_tows()
+        # create bay data dictionary
+        self.get_bays(terminals=self.__terminals, nbays=self.__nbays)
 
-        self.__tconf = self.get_tconf()
+        self.__keys_bays = [(ter, k) for ter in self.__bays for k in self.__bays[ter]]
+        self.__keys = [(i, ter, k) for i in self.__map_turns for ter in self.__bays for k in self.__bays[ter]]
+
+        # get costs matrices for turns and tows for objective function
+        self.get_costs_turns()
+        self.get_costs_tows()
+
+        self.get_tconf()
 
         # Creates the 'prob' variable to contain the problem data
         self.__prob = LpProblem("Bay_Assignment", LpMinimize)
-
-        # Creates a list of tuples containing all the possible combinations of flight and bays
-        self.__keys = [(i, k) for i in self.__map_turns for k in self.__bays]
-
-        self.__var_turns, self.__var_tows = self.make_vars()
-
+        self.__var_tows = LpVariable.dicts("w", ([i for i in self.__lturns["FULL"]]), 0, 1, LpInteger)
+        self.__var_turns = LpVariable.dicts("x", ([i for i in self.__map_turns], [ter for ter in self.__bays],
+                                                [k for ter in self.__bays for k in self.__bays[ter]]), 0, 1, LpInteger)
         self.make_objf()
         self.make_cons()
 
         self.writeLP()
         self.solve()
 
-    def get_bays(self, terminals: list, nbays: list):
-        bays = {}
-        # Create a dictionary with bay data
-        for idx, ter in enumerate(terminals):
-            for k in range(1, nbays[idx] + 1):
+    def get_bays(self, terminals: list, nbays: dict):
+        for ter in terminals:
+            for k in range(1, nbays[ter]+1):
                 if ter == "B":
-                    bays[ter + str(k)] = {"type": "INT"}
                     if k <= self.__int_lbays:
-                        bays[ter + str(k)].update({"dist": ceil(k / 2) * 4 - 2, "cat": cat_list("B", "H")})
+                        self.__bays[ter][k] = {"type": "INT", "cat": cat_list("B", "H"), "dist": ceil(k / 2) * 4 - 2,
+                                               "size": "L"}
                     elif k <= self.__int_lbays + self.__int_sbays:
-                        bays[ter + str(k)].update({"dist": ceil(k / 2) * 3 - 0.5, "cat": cat_list("B", "G")})
+                        self.__bays[ter][k] = {"type": "INT", "cat": cat_list("B", "G"), "dist": ceil(k / 2) * 3 - 0.5,
+                                               "size": "S"}
                     else:
-                        bays[ter + str(k)].update(
-                            {"dist": 10 + ceil((self.__int_lbays + self.__int_sbays) / 2) * 3 - 0.5,
-                             "cat": cat_list("A", "G")})
+                        self.__bays[ter][k] = {"type": "INT", "cat": cat_list("A", "G"), "dist": self.__bdis}
                 elif ter == "A":
-                    bays[ter + str(k)] = {"type": "DOM"}
                     if k <= self.__dom_lbays:
-                        bays[ter + str(k)].update({"dist": ceil(k / 2) * 3 - 1.5, "cat": cat_list("B", "H")})
+                        self.__bays[ter][k] = {"type": "DOM", "cat": cat_list("B", "G"), "dist": ceil(k / 2) * 3 - 1.5,
+                                               "size": "L"}
                     elif k <= self.__dom_lbays + self.__dom_sbays:
-                        bays[ter + str(k)].update({"dist": ceil(k / 2) * 2, "cat": cat_list("B", "E")})
+                        self.__bays[ter][k] = {"type": "DOM", "cat": cat_list("B", "E"), "dist": ceil(k / 2) * 2,
+                                               "size": "S"}
                     else:
-                        bays[ter + str(k)].update({"dist": 10 + ceil((self.__dom_lbays + self.__dom_sbays) / 2) * 2,
-                                                   "cat": cat_list("A", "G")})
-        return bays
+                        self.__bays[ter][k] = {"type": "DOM", "cat": cat_list("A", "G"), "dist": self.__bdis}
 
     def get_costs_turns(self):
-        # create cost matrix
-        costs_turns = defaultdict(dict)
         for i in self.__map_turns:
             a = 1 if isinstance(i, int) else 3
-            for k in self.__bays:
-                if self.__map_turns[i]["type"] == self.__bays[k]["type"]:
-                    costs_turns[i][k] = self.__ac[self.__map_turns[i]["ac"]]["cap"] * self.__bays[k]["dist"] / a
+            for ter, k in self.__keys_bays:
+                if self.__map_turns[i]["type"] == self.__bays[ter][k]["type"]:
+                    self.__costs_turns[i][ter][k] = self.__ac[self.__map_turns[i]["AC"]]["cap"] * \
+                                             self.__bays[ter][k]["dist"] / a
                 else:
-                    costs_turns[i][k] = self.__ter_penalty * self.__ac[self.__map_turns[i]["ac"]]["cap"] * \
-                                        self.__bays[k]["dist"] / a
+                    self.__costs_turns[i][ter][k] = self.__ter_penalty * self.__ac[self.__map_turns[i]["AC"]]["cap"] * \
+                                        self.__bays[ter][k]["dist"]/a
 
             if "PREF" in self.__map_turns[i]:
-                bay_pref = self.__map_turns[i]["PREF"][0]
-                pref = self.__map_turns[i]["PREF"][1]
-                costs_turns[i][bay_pref] = costs_turns[i][bay_pref] / pref
-        return costs_turns
+                ter_pref = self.__map_turns[i]["PREF"]["ter"]
+                bay_pref = self.__map_turns[i]["PREF"]["bay"]
+                val_pref = self.__map_turns[i]["PREF"]["val"]
+                self.__costs_turns[i][ter_pref][bay_pref] = self.__costs_turns[i][ter_pref][bay_pref] / val_pref
 
     def get_costs_tows(self):
-        costs_tows = {}
         tow_cat = {"A": 3000, "B": 3000, "C": 4500, "D": 4500, "E": 4500, "F": 4500, "G": 9000, "H": 9000}
-        for t in self.__lturns["FULL"]:
-            costs_tows[t] = tow_cat[self.__ac[self.__lturns["FULL"][t]["ac"]]["cat"]]
-        return costs_tows
+        for i in self.__lturns["FULL"]:
+            self.__costs_tows[i] = tow_cat[self.__ac[self.__lturns["FULL"][i]["AC"]]["cat"]]
 
     def get_tconf(self):
-        lst = []
-        for i1 in self.__map_turns:
-            arr1, dep1, n1 = self.get_buft(flight=i1)
-            for i2 in self.__map_turns:
-                arr2, dep2, n2 = self.get_buft(flight=i2)
-                if (arr2 <= arr1 <= dep2 or arr2 <= dep1 <= dep2) and n1 != n2:
-                    lst.append([i1, i2])
-        # removing reversed elements in list
-        lst = [v for k, v in enumerate(lst) if v[::-1] not in lst[:k] and v not in lst[:k]]
-        return lst
+        for idx, i1 in enumerate(list(self.__map_turns.keys())):
+            arr1, dep1 = self.get_buft(flight=i1)
+            for i2 in list(self.__map_turns.keys())[idx + 1:]:
+                arr2, dep2 = self.get_buft(flight=i2)
+                [n1, n2] = get_flightn(flights=[i1, i2])
+                if (arr1 <= arr2 <= dep1 or arr1 <= dep2 <= dep1 or (arr2 <= arr1 and dep2 >= dep1)) and n1 != n2:
+                    self.__tconf.append([i1, i2])
 
     def get_buft(self, flight):
         arr = self.__map_turns[flight]["ETA"]
         dep = self.__map_turns[flight]["ETD"]
         if isinstance(flight, int):
-            n = flight
             arr -= self.__arr_buf
             dep += self.__dep_buf
         else:
-            n = int(flight[0])
             if flight[-1] == "A":
                 arr -= self.__arr_buf
             elif flight[-1] == "D":
                 dep += self.__dep_buf
-        return arr, dep, n
-
-    def make_vars(self):
-        var_turns = LpVariable.dicts("x", ([i for i in self.__map_turns], [k for k in self.__bays]), 0, 1, LpInteger)
-        var_tows = LpVariable.dicts("w", ([i for i in self.__lturns["FULL"]]), 0, 1, LpInteger)
-        return var_turns, var_tows
+        return arr, dep
 
     def make_objf(self):
-        self.__prob += lpSum([self.__var_turns[i][k] * self.__costs_turns[i][k] for (i, k) in self.__keys] +
+        self.__prob += lpSum([self.__var_turns[i][ter][k] * self.__costs_turns[i][ter][k] for (i, ter, k) in self.__keys] +
                              [self.__var_tows[t] * self.__costs_tows[t] for t in self.__lturns["FULL"]]), "obj_fun"
 
     def make_cons(self):
-        self.make_const_bay()
-        self.make_const_asg()
-        self.make_const_t()
+        self.const_bay()
+        self.const_asg()
+        self.const_t()
+        self.const_tow()
+        self.make_const_adj()
 
-    def make_const_bay(self):
-        for (i, k) in self.__keys:
-            if self.__ac[self.__map_turns[i]["ac"]]["cat"] not in self.__bays[k]["cat"] or \
-                    ((isinstance(i, str) and i[-1] == "P") and
-                     ((k[0] == "A" and int(k.replace("A", "")) <= self.__dom_lbays + self.__dom_sbays) or
-                      (k[0] == "B" and int(k.replace("B", "")) <= self.__int_lbays + self.__int_sbays))):
-                self.__prob += lpSum(self.__var_turns[i][k]) == 0, "BayConstraint_Bay:%s_Flight:%s" % (i, k)
+    def const_bay(self):
+        for (i, ter, k) in self.__keys:
+            if self.__ac[self.__map_turns[i]["AC"]]["cat"] not in self.__bays[ter][k]["cat"]:
+                self.__prob += lpSum(self.__var_turns[i][ter][k]) == 0, "AircraftConstraint_Ter:%s_Bay:%s_Flight:%s" % (ter, k, i)
+            elif (isinstance(i, str) and i[-1] == "P") and ((ter == "A" and k <= self.__dom_lbays + self.__dom_sbays) or
+                                                            (ter == "B" and k <= self.__int_lbays + self.__int_sbays)):
+                self.__prob += lpSum(self.__var_turns[i][ter][k]) == 0, "ParkingConstraint_Ter:%s_Bay:%s_Flight:%s" % (ter, k, i)
 
-    def make_const_asg(self):
+    def const_asg(self):
         for i in self.__turns:
-            self.__prob += lpSum([self.__var_turns[i][k] for k in self.__bays]) == 1, "AssignmentConstraint_Flight:%s" % i
-        for i in self.__lturns["FULL"]:
-            self.__prob += lpSum(self.__var_tows[i] + [self.__var_turns[i][k] for k in self.__bays]) == 1, \
-                           "AssignmentConstraint_FullTow_Flight:%s" % i
+            self.__prob += lpSum(
+                [self.__var_turns[i][ter][k] for ter in self.__bays for k in self.__bays[ter]]) == 1, \
+                                        "AssignmentConstraint_Flight:%s" % i
+        for t in self.__lturns["FULL"]:
+            self.__prob += lpSum(self.__var_tows[t] + [self.__var_turns[t][ter][k] for ter in self.__bays
+                                        for k in self.__bays[ter]]) == 1, "AssignmentConstraintFull_Flight:%s" % t
         for i in self.__lturns["SPLIT"]:
             self.__prob += lpSum(-self.__var_tows[int("".join(x for x in i if x not in "PAD"))] +
-                                 [self.__var_turns[i][k] for k in self.__bays]) == 0, \
-                           "AssignmentConstraint_SplitTow_Flight:%s" % i
+                                 [self.__var_turns[i][ter][k] for ter in self.__bays for k in self.__bays[ter]]) == 0, \
+                                        "AssignmentConstraintSplit_Flight:%s" % i
 
-    def make_const_t(self):
+    def const_t(self):
         for x in self.__tconf:
-            for k in self.__bays:
-                self.__prob += lpSum(self.__var_turns[x[0]][k] + self.__var_turns[x[1]][k]) <= 1, \
-                               "TimeConstraint_Flights:%s&%s_Bay:%s" % (x[0], x[1], k)
+            for ter, k in self.__keys_bays:
+                self.__prob += lpSum(self.__var_turns[x[0]][ter][k] + self.__var_turns[x[1]][ter][k]) <= 1, \
+                               "TimeConstraint_Ter:%s_Bay:%s_Flights:%s&%s" % (ter, k, x[0], x[1])
+
+    def const_tow(self):
+        for i in self.__lturns["FULL"]:
+            if self.__lturns["FULL"][i].get("tow"):
+                self.__prob += lpSum(self.__var_tows[i]) == 1, "TowConstraintFlight:%s" % i
+
+    def make_const_adj(self):
+        self.__const_adf["INT"]["L"]["L"] = dict.fromkeys(["H", "G"], cat_list("B", "F"))
+        self.__const_adf["INT"]["L"]["L"].update(dict.fromkeys(["F", "E", "D", "C", "B"], cat_list("B", "H")))
+        self.__const_adf["INT"]["L"]["S"] = {"H": cat_list("B", "F"), "G": cat_list("B", "F"), "F": cat_list("B", "F")}
+        self.__const_adf["INT"]["S"]["S"] = {"H": cat_list("B", "F"), "G": cat_list("B", "F"), "F": cat_list("B", "F")}
+        self.__const_adf["DOM"]["L"]["L"] = {"H": cat_list("B", "F"), "G": cat_list("B", "F"), "F": cat_list("B", "F")}
+        self.__const_adf["DOM"]["L"]["S"] = {"H": cat_list("B", "F"), "G": cat_list("B", "F"), "F": cat_list("B", "F")}
+        self.__const_adf["DOM"]["S"]["S"] = {"H": cat_list("B", "F"), "G": cat_list("B", "F"), "F": cat_list("B", "F")}
+
+        for idx, i1 in enumerate(list(self.__map_turns.keys())):
+            for ter, k in self.__keys_bays:
+                for i2 in list(self.__map_turns.keys())[idx + 1:]:
+                    [n1, n2] = get_flightn(flights=[i1,i2])
+                    if n1 != n2 and ((ter == "A" and k <= self.__dom_lbays + self.__dom_sbays - 2) or
+                                    (ter == "B" and k <= self.__int_lbays + self.__int_sbays - 2)) and \
+                            self.__ac[self.__map_turns[i1]["AC"]]["cat"] in self.__bays[ter][k]["cat"] and \
+                            self.__ac[self.__map_turns[i2]["AC"]]["cat"] in self.__bays[ter][k + 2]["cat"] and \
+                            self.__ac[self.__map_turns[i2]["AC"]]["cat"] not in \
+                            self.__const_adf[self.__bays[ter][k]["type"]][self.__bays[ter][k]["size"]][
+                            self.__bays[ter][k + 2]["size"]][self.__ac[self.__map_turns[i1]["AC"]]["cat"]]:
+                                self.__prob += lpSum(self.__var_turns[i1][ter][k] + self.__var_turns[i2][ter][k+2]) == 0,\
+                                               "AdjacencyConstraint_Ter:%s_Bay:%s_Flights:%s&%s" % (ter, k, i1, i2)
 
     def writeLP(self):
         # The problem data is written to an .lp file
