@@ -3,12 +3,12 @@ The Bay Assignment Problem
 Authors: Mauro, Luke   2020
 """
 # Importing modules
+import time
 from collections import defaultdict, ChainMap
-from operator import not_
-from pulp import LpProblem, LpMinimize, lpSum, LpInteger, LpVariable, LpStatus, value
+from pulp import LpProblem, LpMinimize, lpSum, LpInteger, LpVariable, LpStatus, value, CPLEX_CMD
 from datetime import datetime, timedelta
 
-from flight_schedule import Scheduler, cat_list
+from flight_schedule import Scheduler
 
 
 def flight_check(flights: list):
@@ -16,15 +16,22 @@ def flight_check(flights: list):
         flights[idx] = str("".join(x for x in flight if x not in ["P", "A", "D"]))
     return not flights or flights.count(flights[0]) == len(flights)
 
+def solve_time(n:int, nflights: int, solver):
+    solve_times = []
+    for i in range(n):
+        bay_assignment = LPSolver(nflights=nflights, solver=solver)
+        solve_times.append(bay_assignment.return_solvetime())
+    return sum(solve_times)/len(solve_times)
 
 class LPSolver(object):
-    def __init__(self, nflights: int, date: datetime = datetime(2010, 6, 15), tbuf: dict = None,
+    def __init__(self, nflights: int, solver = None, date: datetime = datetime(2010, 6, 15), tbuf: dict = None,
                  plotting: bool = False):
 
         self.__schedule = Scheduler(nflights, date=date, plotting=plotting)
         if tbuf is None:
-            tbuf = {"arr": timedelta(minutes=15), "dep": timedelta(minutes=15)}
+            tbuf = timedelta(minutes=15)
         self.__tbuf = tbuf
+        self.__solver = solver
 
         self.__ac = self.__schedule.return_ac()
 
@@ -36,44 +43,55 @@ class LPSolver(object):
         self.__lturns = self.__schedule.return_lturns()
         # create chain map of all turns
         self.__map_turns = ChainMap(self.__turns, self.__lturns["FULL"], self.__lturns["SPLIT"])
+        self.__map_fturns = ChainMap(self.__turns, self.__lturns["FULL"])
 
         self.__costs_turns = defaultdict(lambda: defaultdict(dict))
         self.__costs_tows = {}
+        self.__costs_nobay = {}
 
         # USE .get() to avoid unnecessary adjacency constraints
-        self.__adj = {"INT": {"L": {"L": {"H": cat_list(["G", "H"]), "G": cat_list(["G", "H"])},
-                                    "S": {"H": cat_list(["F", "G"]), "G": ["G"]}},
-                              "S": {"S": {"G": ["G"]}}},
-                      "DOM": {"L": {"L": {"G": cat_list(["F", "G"]), "F": ["G"]},
-                                    "S": {"G": ["E"]}},
-                              "S": {"S": {"E": ["E"]}}}}
+        self.__adj = {"INT": {"L": {"L": {"H": ["H", "G"], "G": "H"},
+                                    "S": {"H": ["G", "F"], "G": "G"}},
+                              "S": {"S": {"G": ["G", "F"], "F": "G"}}},
+                      "DOM": {"L": {"L": {"G": ["G", "F"], "F": "G"},
+                                    "S": {"G": "E"}},
+                              "S": {"S": {"E": "E"}}}}
 
         self.__keys_bays = [(ter, k) for ter in self.__bays for k in self.__bays[ter]]
         self.__keys = [(i, ter, k) for i in self.__map_turns for ter in self.__bays for k in self.__bays[ter]]
 
         # get costs matrices for turns and tows for objective function
-        self.get_costs_turns()
-        self.get_costs_tows()
+        self.costs_turns()
+        self.costs_tows()
+        self.costs_nobay()
 
         # Creates the 'prob' variable to contain the problem data
         self.__prob = LpProblem("Bay_Assignment", LpMinimize)
-        self.__var_tows = LpVariable.dicts("w", ([i for i in self.__lturns["FULL"]]), 0, 1, LpInteger)
-        self.__var_turns = LpVariable.dicts("x", ([i for i in self.__map_turns], [ter for ter in self.__bays],
-                                                  [k for ter in self.__bays for k in self.__bays[ter]]), 0, 1, LpInteger)
+        self.__var_tow = LpVariable.dicts("w", ([i for i in self.__lturns["FULL"]]), 0, 1, LpInteger)
+        self.__var_turn = LpVariable.dicts("x", ([i for i in self.__map_turns], [ter for ter in self.__bays],
+                                                 [k for ter in self.__bays for k in self.__bays[ter]]), 0, 1, LpInteger)
+        self.__var_nobay = LpVariable.dicts("y", ([i for i in self.__map_fturns]), 0, 1, LpInteger)
         self.make_objf()
         self.make_const()
 
-        self.solve()
+        self.writeLP()
+
+        start = time.perf_counter()
+        self.solve(solver=self.__solver)
+        self.__solvetime = time.perf_counter() - start
+
+    def return_solvetime(self):
+        return self.__solvetime
 
     def ac_data(self, flight: str):
         return self.__ac[
             list(self.__ac.keys())[[self.__ac[x]["AC"] for x in self.__ac].index(self.__map_turns[flight]["AC"])]]
 
-    def get_costs_turns(self):
+    def costs_turns(self):
         for i in self.__map_turns:
             a = 3 if ("P" in i) or ("A" in i) or ("D" in i) else 1
             for ter, k in self.__keys_bays:
-                if self.__map_turns[i]["ter"] == ter:
+                if self.__map_turns[i]["ter"] == ter or ter == "BUS":
                     self.__costs_turns[i][ter][k] = self.ac_data(flight=i)["cap"] * self.__bays[ter][k]["dist"] / a
                 else:
                     self.__costs_turns[i][ter][k] = self.__ter_penalty * self.ac_data(flight=i)["cap"] * \
@@ -84,43 +102,51 @@ class LPSolver(object):
                 pref = self.__map_turns[i]["pref"]["val"]
                 self.__costs_turns[i][ter_pref][bay_pref] = self.__costs_turns[i][ter_pref][bay_pref] / pref
 
-    def get_costs_tows(self):
-        tow_cat = {"A": 4000, "B": 4000, "C": 400, "D": 5000, "E": 5000, "F": 5000, "G": 9000, "H": 9000}
-        for i in self.__lturns["FULL"]:
-            self.__costs_tows[i] = tow_cat[self.ac_data(flight=i)["cat"]]
+    def costs_nobay(self):
+        nobay_cat = {"A": 20000, "B": 20000, "C": 50000, "D": 50000, "E": 50000, "F": 70000, "G": 70000, "H": 100000}
+        for i in self.__turns:
+            self.__costs_nobay[i] = nobay_cat[self.ac_data(flight=i)["cat"]]
+        for l in self.__lturns["FULL"]:
+            self.__costs_nobay[l] = nobay_cat[self.ac_data(flight=l)["cat"]]
+
+    def costs_tows(self):
+        tow_cat = {"A": 3000, "B": 3000, "C": 5000, "D": 5000, "E": 5000, "F": 8000, "G": 8000, "H": 10000}
+        for l in self.__lturns["FULL"]:
+            self.__costs_tows[l] = tow_cat[self.ac_data(flight=l)["cat"]]
 
     def make_objf(self):
         self.__prob += lpSum(
-            [self.__var_turns[i][ter][k] * self.__costs_turns[i][ter][k] for (i, ter, k) in self.__keys] +
-            [self.__var_tows[t] * self.__costs_tows[t] for t in self.__lturns["FULL"]]), "obj_fun"
+            [self.__var_turn[i][ter][k] * self.__costs_turns[i][ter][k] for (i, ter, k) in self.__keys] +
+            [self.__var_tow[t] * self.__costs_tows[t] for t in self.__lturns["FULL"]] +
+            [self.__var_nobay[i] * self.__costs_nobay[i] for i in self.__map_fturns]), "obj_fun"
 
     def make_const(self):
-        self.bay_const()
-        self.asg_const()
+        self.asg_turns()
+        self.asg_lturns()
         self.tow_const()
-        self.time_const()
         self.adj_const()
+        self.time_const()
 
-    def bay_const(self):
-        for (i, ter, k) in self.__keys:
-            if self.ac_data(flight=i)["cat"] not in self.__bays[ter][k]["cat"]:
-                self.__prob += lpSum(self.__var_turns[i][ter][k]) == 0, \
-                               "AircraftConstraint_Terminal:%s_Bay:%s_Flight:%s" % (ter, k, i)
-            elif i[-1] == "P" and k <= self.__terminals[ter]["L"]["num"] + self.__terminals[ter]["S"]["num"]:
-                self.__prob += lpSum(self.__var_turns[i][ter][k]) == 0, \
-                               "ParkingConstraint_Terminal:%s_Bay:%s_Flight:%s" % (ter, k, i)
-
-    def asg_const(self):
+    def asg_turns(self):
         for i in self.__turns:
-            self.__prob += lpSum([self.__var_turns[i][ter][k] for ter in self.__bays for k in self.__bays[ter]]) == 1, \
-                           "AssignmentConstraint_Flight:%s" % i
+            bays = defaultdict(dict)
+            for ter, k in self.__keys_bays:
+                if self.ac_data(flight=i)["cat"] in self.__bays[ter][k]["cat"]:
+                    bays[ter][k] = True
+            self.__prob += lpSum([self.__var_turn[i][ter][k] for ter in bays for k in bays[ter]] +
+                                 self.__var_nobay[i]) == 1, "AssignConstFlight%s" % i
+
+    def asg_lturns(self):
         for l in self.__lturns["FULL"]:
-            self.__prob += lpSum(self.__var_tows[l] + [self.__var_turns[l][ter][k] for ter in self.__bays for k in
-                                                       self.__bays[ter]]) == 1, "AssignmentConstraint_FullFlight:%s" % l
-        for s in self.__lturns["SPLIT"]:
-            self.__prob += lpSum(self.__var_tows[str("".join(x for x in s if x not in ["P", "A", "D"]))] -
-                                 [self.__var_turns[s][ter][k] for ter in self.__bays for k in self.__bays[ter]]) == 0, \
-                           "AssignmentConstraint_SplitFlight:%s" % s
+            bays = defaultdict(dict)
+            for ter, k in self.__keys_bays:
+                if self.ac_data(flight=l)["cat"] in self.__bays[ter][k]["cat"]:
+                    bays[ter][k] = True
+            self.__prob += lpSum(self.__var_tow[l] + self.__var_nobay[l] + [self.__var_turn[l][ter][k] for ter in bays \
+                                for k in bays[ter]] + self.__var_nobay[l]) == 1, "AssignConstraintFullFlight%s" % l
+            for s in ["A", "D"]:
+                self.__prob += lpSum(self.__var_tow[l] - [self.__var_turn[l + s][ter][k] for ter in bays for k in
+                                                      bays[ter]]) == 0, "AssignConstSplitFlight%s" % l + s
 
     def time_const(self):
         for idx, i1 in enumerate(list(self.__map_turns.keys())):
@@ -132,46 +158,41 @@ class LPSolver(object):
                     for ter, k in self.__keys_bays:
                         if self.ac_data(flight=i1)["cat"] in self.__bays[ter][k]['cat'] and \
                                 self.ac_data(flight=i2)["cat"] in self.__bays[ter][k]["cat"]:
-                            self.__prob += lpSum(self.__var_turns[i1][ter][k] + self.__var_turns[i2][ter][k]) <= 1, \
-                                           "TimeConstraint_Terminal:%s_Bay:%s&%s_Flights:%s&%s" % (ter, k, k + 2, i1, i2)
+                            self.__prob += lpSum(self.__var_turn[i1][ter][k] + self.__var_turn[i2][ter][k]) <= 1, \
+                                           "TimeConstTer%sBay%sFlights%s&%s" % (ter, k, i1, i2)
 
     def get_tbuf(self, flight):
         arr = self.__map_turns[flight]["ETA"]
         dep = self.__map_turns[flight]["ETD"]
-        if "A" in flight:
-            arr -= self.__tbuf["arr"]
-        elif "D" in flight:
-            dep += self.__tbuf["dep"]
-        elif "P" not in flight:
-            arr -= self.__tbuf["arr"]
-            dep += self.__tbuf["dep"]
-        return arr, dep
+        return arr+self.__tbuf, dep+self.__tbuf
 
     def tow_const(self):
         for l in self.__lturns["FULL"]:
             if self.__lturns["FULL"][l].get("tow"):
-                self.__prob += lpSum(self.__var_tows[l]) == 1, "TowConstraintFlight:%s" % l
+                self.__prob += lpSum(self.__var_tow[l]) == 1, "TowConstFlight%s" % l
 
     def adj_const(self):
         for idx, i1 in enumerate(list(self.__map_turns.keys())):
+            arr1, dep1 = self.get_tbuf(flight=i1)
             for ter, k in self.__keys_bays:
                 for i2 in list(self.__map_turns.keys())[idx + 1:]:
-                    if flight_check(flights=[i1, i2]) and self.ac_data(flight=i1)["cat"] in \
-                            self.__bays[ter].get(k, {}).get('cat', []) and self.ac_data(flight=i2)["cat"] in \
-                            self.__bays[ter].get(k + 2, {}).get('cat', []) and self.ac_data(flight=i2)["cat"] in \
-                            self.__adj[ter].get(self.__bays[ter][k]["size"], {}).get(self.__bays[ter].get(k + 2, {})
-                            .get("size"), {}).get(self.ac_data(flight=i1)["cat"], []):
-                        self.__prob += lpSum(self.__var_turns[i1][ter][k] + self.__var_turns[i2][ter][k + 2]) == 0, \
-                                       "AdjacencyConstraint_Ter:%s_Bay:%s_Flights:%s&%s" % (ter, k, i1, i2)
+                    arr2, dep2 = self.get_tbuf(flight=i2)
+                    if not flight_check(flights=[i1, i2]) and ((arr1 <= arr2 <= dep1 or arr1 <= dep2 <= dep1) or
+                                                               (arr2 <= arr1 and dep2 >= dep1)):
+                        if self.ac_data(flight=i1)["cat"] in self.__bays[ter][k]['cat'] and \
+                            self.ac_data(flight=i2)["cat"] in self.__bays[ter].get(k + 2, {}).get('cat', []) and \
+                            self.ac_data(flight=i2)["cat"] in self.__adj.get(ter, {}).get(self.__bays[ter][k]["size"], {})\
+                                .get(self.__bays[ter].get(k + 2, {}).get("size"), {}).get(self.ac_data(flight=i1)["cat"], []):
+                            self.__prob += lpSum(self.__var_turn[i1][ter][k] + self.__var_turn[i2][ter][k + 2]) == 0, \
+                                           "AdjConstTer%sBay%sFlights%s&%s" % (ter, k, i1, i2)
 
     def writeLP(self):
         # The problem data is written to an .lp file
         self.__prob.writeLP("BayAssignmentProblem.lp")
 
-    def solve(self):
-        self.writeLP()
+    def solve(self, solver):
         # The problem is solved using PuLP's choice of Solver
-        self.__prob.solve()
+        self.__prob.solve(solver)
 
         # The status of the solution is printed to the screen
         print("Status:", LpStatus[self.__prob.status])
@@ -186,4 +207,4 @@ class LPSolver(object):
 
 
 if __name__ == "__main__":
-    solver = LPSolver(nflights=50, plotting=False)
+    CPLEX_time = solve_time(n=5, nflights=50, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))
