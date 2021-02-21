@@ -16,12 +16,14 @@ def flight_check(flights: list):
         flights[idx] = str("".join(x for x in flight if x not in ["P", "A", "D"]))
     return not flights or flights.count(flights[0]) == len(flights)
 
+
 def solve_time(n:int, nflights: int, solver):
     solve_times = []
     for i in range(n):
         bay_assignment = LPSolver(nflights=nflights, solver=solver)
         solve_times.append(bay_assignment.return_solvetime())
     return sum(solve_times)/len(solve_times)
+
 
 class LPSolver(object):
     def __init__(self, nflights: int, solver = None, date: datetime = datetime(2010, 6, 15), tbuf: dict = None,
@@ -89,13 +91,16 @@ class LPSolver(object):
 
     def costs_turns(self):
         for i in self.__map_turns:
-            a = 3 if ("P" in i) or ("A" in i) or ("D" in i) else 1
             for ter, k in self.__keys_bays:
-                if self.__map_turns[i]["ter"] == ter or ter == "BUS":
-                    self.__costs_turns[i][ter][k] = self.ac_data(flight=i)["cap"] * self.__bays[ter][k]["dist"] / a
+                if "P" in i:
+                    self.__costs_turns[i][ter][k] = 1
                 else:
-                    self.__costs_turns[i][ter][k] = self.__ter_penalty * self.ac_data(flight=i)["cap"] * \
-                                                    self.__bays[ter][k]["dist"] / a
+                    a = 2 if ("A" in i) or ("D" in i) else 1
+                    if self.__map_turns[i]["ter"] == ter or ter == "BUS":
+                        self.__costs_turns[i][ter][k] = self.ac_data(flight=i)["cap"] * self.__bays[ter][k]["dist"] / a
+                    else:
+                        self.__costs_turns[i][ter][k] = self.__ter_penalty * self.ac_data(flight=i)["cap"] * \
+                                                        self.__bays[ter][k]["dist"] / a
             if "pref" in self.__map_turns[i]:
                 ter_pref = self.__map_turns[i]["pref"]["ter"]
                 bay_pref = self.__map_turns[i]["pref"]["bay"]
@@ -110,7 +115,7 @@ class LPSolver(object):
             self.__costs_nobay[l] = nobay_cat[self.ac_data(flight=l)["cat"]]
 
     def costs_tows(self):
-        tow_cat = {"A": 3000, "B": 3000, "C": 5000, "D": 5000, "E": 5000, "F": 8000, "G": 8000, "H": 10000}
+        tow_cat = {"A": 100, "B": 100, "C": 200, "D": 200, "E": 200, "F": 400, "G": 400}
         for l in self.__lturns["FULL"]:
             self.__costs_tows[l] = tow_cat[self.ac_data(flight=l)["cat"]]
 
@@ -139,14 +144,22 @@ class LPSolver(object):
     def asg_lturns(self):
         for l in self.__lturns["FULL"]:
             bays = defaultdict(dict)
+            bays_split = defaultdict(dict)
+            bays_park = defaultdict(dict)
             for ter, k in self.__keys_bays:
                 if self.ac_data(flight=l)["cat"] in self.__bays[ter][k]["cat"]:
                     bays[ter][k] = True
+                    if ter != "BUS":
+                        bays_split[ter][k] = True
+                    else:
+                        bays_park[ter][k] = True
             self.__prob += lpSum(self.__var_tow[l] + self.__var_nobay[l] + [self.__var_turn[l][ter][k] for ter in bays \
-                                for k in bays[ter]] + self.__var_nobay[l]) == 1, "AssignConstraintFullFlight%s" % l
+                                for k in bays[ter]]) == 1, "AssignConstraintFullFlight%s" % l
+            self.__prob += lpSum(self.__var_tow[l] - [self.__var_turn[l + "P"][ter][k] for ter in bays for k in
+                                                      bays_park[ter]]) == 0, "AssignConstSplitFlight%s" % l + "P"
             for s in ["A", "D"]:
                 self.__prob += lpSum(self.__var_tow[l] - [self.__var_turn[l + s][ter][k] for ter in bays for k in
-                                                      bays[ter]]) == 0, "AssignConstSplitFlight%s" % l + s
+                                                      bays_split[ter]]) == 0, "AssignConstSplitFlight%s" % l + s
 
     def time_const(self):
         for idx, i1 in enumerate(list(self.__map_turns.keys())):
@@ -207,4 +220,4 @@ class LPSolver(object):
 
 
 if __name__ == "__main__":
-    CPLEX_time = LPSolver(nflights=60, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))
+    CPLEX_time = LPSolver(nflights=50, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))

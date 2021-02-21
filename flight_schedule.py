@@ -40,7 +40,7 @@ class Scheduler(object):
                                    "mean_len": timedelta(minutes=60), "std_len": 30}}}
 
         self.__weights = {
-            "INT": {"AC": {10: 0.35, 11: 0.3, 12: 0.2, 13: 0.13, 14: 0.02}, "tzone": {1: 0.2, 2: 0.15, 3: 0.05},
+            "INT": {"AC": {10: 0.35, 11: 0.3, 12: 0.2, 13: 0.13, 14: 0.02}, "tzone": {1: 0.25, 2: 0.1, 3: 0.05},
                     "tow": 0, "pref": 0.3},
             "DOM": {"AC": {1: 0.05, 2: 0.05, 3: 0.05, 4: 0.05, 5: 0.1, 6: 0.2, 7: 0.1, 8: 0.1,
                            9: 0.2, 10: 0.1}, "tzone": {4: 0.6}, "tow": 0, "pref": 0.2}}
@@ -193,9 +193,14 @@ class Scheduler(object):
                     lturns["FULL"][flight] = self.__schedule[flight].copy()
                     lturns["SPLIT"][flight + "A"] = self.__schedule[flight].copy()
                     lturns["SPLIT"][flight + "D"] = self.__schedule[flight].copy()
+                    lturns["SPLIT"][flight + "P"] = self.__schedule[flight].copy()
 
                     lturns["SPLIT"][flight + "A"]["ETD"] = self.__schedule[flight]["ETA"] + timedelta(minutes=30)
                     lturns["SPLIT"][flight + "D"]["ETA"] = self.__schedule[flight]["ETD"] - timedelta(minutes=30)
+                    lturns["SPLIT"][flight + "P"]["ETA"] = lturns["SPLIT"][flight + "A"]["ETD"]
+                    lturns["SPLIT"][flight + "P"]["ETD"] = lturns["SPLIT"][flight + "D"]["ETA"]
+                    if "pref" in lturns["SPLIT"][flight + "P"]:
+                        del lturns["SPLIT"][flight + "P"]['pref']
                     del turns[flight]
         return turns, lturns
 
