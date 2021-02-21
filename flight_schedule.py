@@ -1,3 +1,4 @@
+import inspect
 from math import ceil
 from random import choices, gauss
 from collections import defaultdict
@@ -203,6 +204,11 @@ class Scheduler(object):
                         del lturns["SPLIT"][flight + "P"]['pref']
                     del turns[flight]
         return turns, lturns
+
+    def return_data(self):
+        attributes = inspect.getmembers(self, lambda a: not (inspect.isroutine(a)))
+        attr = {'_'.join(a[0].split('_')[3:]) : a[1] for a in attributes if not (a[0].startswith('__') and a[0].endswith('__'))}
+        return attr
 
     def return_turns(self):
         return self.__turns

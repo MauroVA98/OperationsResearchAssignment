@@ -4,11 +4,18 @@ Authors: Mauro, Luke   2020
 """
 # Importing modules
 import time
+import inspect
 from collections import defaultdict, ChainMap
 from pulp import LpProblem, LpMinimize, lpSum, LpInteger, LpVariable, LpStatus, value, CPLEX_CMD
 from datetime import datetime, timedelta
 
 from flight_schedule import Scheduler
+
+
+def remove_clone_logs():
+    for file in os.listdir(os.getcwd()):
+        if 'clone' in file:
+            os.remove(os.path.join(os.getcwd(), file))
 
 
 def flight_check(flights: list):
@@ -218,6 +225,15 @@ class LPSolver(object):
         # The optimised objective function value is printed to the screen
         print("Objective Function Value = ", value(self.__prob.objective))
 
+    def return_data(self):
+        attributes = inspect.getmembers(self, lambda a: not (inspect.isroutine(a)))
+        attr = {'_'.join(a[0].split('_')[3:]) : a[1] for a in attributes if not (a[0].startswith('__') and a[0].endswith('__'))}
+        attr['schedule'] = attr['schedule'].return_data()
+        return attr
 
 if __name__ == "__main__":
+    import os
     CPLEX_time = LPSolver(nflights=50, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))
+    remove_clone_logs()
+    a = CPLEX_time.return_data()
+
