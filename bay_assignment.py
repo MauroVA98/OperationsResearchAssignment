@@ -207,4 +207,4 @@ class LPSolver(object):
 
 
 if __name__ == "__main__":
-    CPLEX_time = solve_time(n=5, nflights=50, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))
+    CPLEX_time = LPSolver(nflights=60, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))

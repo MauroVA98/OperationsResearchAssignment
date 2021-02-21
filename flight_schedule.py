@@ -30,17 +30,17 @@ class Scheduler(object):
                                     "S": {"num": 6, "cat": ["B", "E"], "dist": 2}},
                             "BUS": {"B": {"num": 6, "cat": ["A", "G"], "dist": 30}}}
 
-        self.__prob = {"INT": {1: {"mean_arr": self.get_dt(hours=8, minutes=0), "std_arr": 60,
+        self.__prob = {"INT": {1: {"mean_arr": self.get_dt(hours=8, minutes=0), "std_arr": 1 * 60,
                                    "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1 * 60},
                                2: {"mean_arr": self.get_dt(hours=14, minutes=0), "std_arr": 3 * 60,
-                                   "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1 * 60},
-                               3: {"mean_arr": self.get_dt(hours=21, minutes=30), "std_arr": 2 * 60,
+                                   "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1.5 * 60},
+                               3: {"mean_arr": self.get_dt(hours=21, minutes=00), "std_arr": 1 * 60,
                                    "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1 * 60}},
-                       "DOM": {4: {"mean_arr": self.get_dt(hours=12, minutes=0), "std_arr": 6 * 60,
-                                   "mean_len": timedelta(minutes=60), "std_len": 1 * 60}}}
+                       "DOM": {4: {"mean_arr": self.get_dt(hours=14, minutes=0), "std_arr": 6 * 60,
+                                   "mean_len": timedelta(minutes=60), "std_len": 30}}}
 
         self.__weights = {
-            "INT": {"AC": {10: 0.35, 11: 0.3, 12: 0.2, 13: 0.13, 14: 0.02}, "tzone": {1: 0.2, 2: 0.1, 3: 0.1},
+            "INT": {"AC": {10: 0.35, 11: 0.3, 12: 0.2, 13: 0.13, 14: 0.02}, "tzone": {1: 0.2, 2: 0.15, 3: 0.05},
                     "tow": 0, "pref": 0.3},
             "DOM": {"AC": {1: 0.05, 2: 0.05, 3: 0.05, 4: 0.05, 5: 0.1, 6: 0.2, 7: 0.1, 8: 0.1,
                            9: 0.2, 10: 0.1}, "tzone": {4: 0.6}, "tow": 0, "pref": 0.2}}
@@ -177,6 +177,10 @@ class Scheduler(object):
         ax.xaxis.set_major_formatter(DateFormatter('%H:%M'))
         fig.autofmt_xdate()
 
+        plt.xlabel("Time")
+        plt.ylabel("Aircraft")
+        plt.grid()
+
         plt.show()
 
     def pross_schedule(self):
@@ -212,4 +216,4 @@ class Scheduler(object):
 
 
 if __name__ == "__main__":
-    ac_schedule = Scheduler(nflights=50, plotting=False)
+    ac_schedule = Scheduler(nflights=80, plotting=True)
