@@ -279,9 +279,5 @@ if __name__ == "__main__":
 
     replaced = make_data_serializable(data)
 
-
-
-    # as requested in comment
-
-    with open('file.json', 'w') as file:
+    with open('outputdata/file.json', 'w') as file:
         file.write(json.dumps(replaced))

@@ -10,6 +10,23 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
 
 
+def convert_dict_keys(data: dict, keytype: type = int):
+    result = {}
+    for key, value in data.items():
+        if(isinstance(value, dict)):
+            try:
+                result[keytype(key)] = convert_dict_keys(value, keytype)
+            except ValueError:
+                result[key] = convert_dict_keys(value, keytype)
+        else:
+            try:
+                result[keytype(key)] = value
+            except ValueError:
+                result[key] = value
+
+    return result
+
+
 def return_data(obj, *excludes, custom=True):
     attributes = inspect.getmembers(obj, lambda a: not (inspect.isroutine(a)))
     attr = {'_'.join(a[0].split('_')[3:]) * bool(custom) + a[0] * bool(custom - 1): a[1] for a in attributes if
@@ -25,7 +42,8 @@ def cat_list(lst: list):
 
 class Scheduler(object):
     def __init__(self, nflights: int, date: datetime = datetime(2010, 6, 15), plotting: bool = False,
-                 ac_file: str = r"./programdata/ac.json", terminal_file: str = r"./programdata/terminals.json"):
+                 ac_file: str = r"./programdata/ac.json", terminal_file: str = r"./programdata/terminals.json",
+                 feature_file : str = r"./programdata/features.json"):
         self.__date = date
         self.__nflights = nflights
 
@@ -44,20 +62,17 @@ class Scheduler(object):
             self.__ac = json.load(file)
             self.__ac = {int(key): value for key, value in self.__ac.items()}
 
-        self.__prob = {"INT": {1: {"mean_arr": self.get_dt(hours=8, minutes=0), "std_arr": 1 * 60,
-                                   "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1 * 60},
-                               2: {"mean_arr": self.get_dt(hours=14, minutes=0), "std_arr": 3 * 60,
-                                   "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1.5 * 60},
-                               3: {"mean_arr": self.get_dt(hours=21, minutes=00), "std_arr": 1 * 60,
-                                   "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1 * 60}},
-                       "DOM": {4: {"mean_arr": self.get_dt(hours=14, minutes=0), "std_arr": 6 * 60,
-                                   "mean_len": timedelta(minutes=60), "std_len": 30}}}
+        with open(feature_file, 'r') as file:
+            temp = json.load(file)
+            self.__prob = convert_dict_keys(temp["prob"], int)
+            self.__weights = convert_dict_keys(temp["weights"], int)
 
-        self.__weights = {
-            "INT": {"AC": {10: 0.35, 11: 0.3, 12: 0.2, 13: 0.13, 14: 0.02}, "tzone": {1: 0.25, 2: 0.1, 3: 0.05},
-                    "tow": 0, "pref": 0.3},
-            "DOM": {"AC": {1: 0.05, 2: 0.05, 3: 0.05, 4: 0.05, 5: 0.1, 6: 0.2, 7: 0.1, 8: 0.1,
-                           9: 0.2, 10: 0.1}, "tzone": {4: 0.6}, "tow": 0, "pref": 0.2}}
+            for key in self.__prob.keys():
+                for var, val in self.__prob[key].items():
+                    if var == 'mean_arr':
+                        self.__prob[key][var] = self.get_dt(hours=val[0], minutes=val[1])
+                    elif var == 'mean_len':
+                        self.__prob[key][var] = timedelta(minutes=val)
 
         self.__bays = defaultdict(dict)
         self.__schedule = {}
@@ -100,18 +115,15 @@ class Scheduler(object):
 
     def make_schedule(self):
         for n in range(1, self.__nflights + 1):
-            tzone = choices(list(val for t in self.__weights for val in self.__weights[t]["tzone"]),
-                            list(weight for t in self.__weights for weight in self.__weights[t]["tzone"]))[0]
-            for t in self.__weights:
-                if tzone in self.__prob[t]:
-                    ter = t
-                else:
-                    continue
+            vals = list(self.__prob.keys())
+            weights = list(self.__prob[k]['weight'] for k in self.__prob.keys())
+            tzone = choices(vals,weights)[0]
+            ter = self.__prob[tzone]['type']
             plane = choices(list(self.__weights[ter]["AC"].keys()), self.__weights[ter]["AC"].values())[0]
-            arr, dep = self.make_t(mean_arr=self.__prob[ter][tzone]["mean_arr"],
-                                   std_arr=self.__prob[ter][tzone]["std_arr"],
-                                   mean_len=self.__prob[ter][tzone]["mean_len"],
-                                   std_len=self.__prob[ter][tzone]["std_len"])
+            arr, dep = self.make_t(mean_arr=self.__prob[tzone]["mean_arr"],
+                                   std_arr=self.__prob[tzone]["std_arr"],
+                                   mean_len=self.__prob[tzone]["mean_len"],
+                                   std_len=self.__prob[tzone]["std_len"])
             self.__schedule[str(n)] = {"AC": self.__ac[plane]["AC"], "ETA": arr, "ETD": dep, "ter": ter}
             if dep - arr > self.__ttow and self.__ac[plane]["cat"] not in ["H", "A"]:
                 tow = choices([True, False], [self.__weights[ter]["tow"], 1 - self.__weights[ter]["tow"]])[0]
