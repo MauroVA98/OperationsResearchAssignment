@@ -4,12 +4,49 @@ Authors: Mauro, Luke   2020
 """
 # Importing modules
 import time
+import os, json
 import inspect
-from collections import defaultdict, ChainMap
+from collections import defaultdict, ChainMap, Iterable
+from re import Pattern
+
 from pulp import LpProblem, LpMinimize, lpSum, LpInteger, LpVariable, LpStatus, value, CPLEX_CMD
 from datetime import datetime, timedelta
 
-from flight_schedule import Scheduler
+from flight_schedule import Scheduler, return_data
+
+def is_jsonable(x):
+    try:
+        json.dumps(x)
+        return True
+    except (TypeError, OverflowError):
+        return False
+
+
+def make_data_serializable(data: dict):
+    result = {}
+    for key, value in data.items():
+        key = str(key)
+        if isinstance(value, dict):
+            result[key] = make_data_serializable(value)
+        elif isinstance(value, datetime):
+            date_time = value.strftime("%Y/%m/%d %H:%M:%S")
+            result[key] = date_time
+        elif isinstance(value, timedelta):
+            result[key] = str(value)
+        elif isinstance(value, LpVariable):
+            result[key] = value.name
+        elif isinstance(value, CPLEX_CMD):
+            continue
+        else:
+            if is_jsonable(value):
+                result[key] = value
+            else:
+                if isinstance(value, list):
+                    result[key] = [vi.__dict__ for vi in value]
+                else:
+                    result[key] = value
+
+    return result
 
 
 def remove_clone_logs():
@@ -226,14 +263,25 @@ class LPSolver(object):
         print("Objective Function Value = ", value(self.__prob.objective))
 
     def return_data(self):
-        attributes = inspect.getmembers(self, lambda a: not (inspect.isroutine(a)))
-        attr = {'_'.join(a[0].split('_')[3:]) : a[1] for a in attributes if not (a[0].startswith('__') and a[0].endswith('__'))}
+        attr = return_data(self, 'map')
         attr['schedule'] = attr['schedule'].return_data()
+        attr['prob'] = return_data(attr['prob'], custom=False)
+        attr['solver'] = return_data(attr['solver'])
         return attr
 
+
 if __name__ == "__main__":
-    import os
+
     CPLEX_time = LPSolver(nflights=50, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))
     remove_clone_logs()
-    a = CPLEX_time.return_data()
+    data = CPLEX_time.return_data()
+    del CPLEX_time
 
+    replaced = make_data_serializable(data)
+
+
+
+    # as requested in comment
+
+    with open('file.json', 'w') as file:
+        file.write(json.dumps(replaced))

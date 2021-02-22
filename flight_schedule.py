@@ -1,4 +1,5 @@
 import inspect
+import json
 from math import ceil
 from random import choices, gauss
 from collections import defaultdict
@@ -9,13 +10,22 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
 
 
+def return_data(obj, *excludes, custom=True):
+    attributes = inspect.getmembers(obj, lambda a: not (inspect.isroutine(a)))
+    attr = {'_'.join(a[0].split('_')[3:]) * bool(custom) + a[0] * bool(custom - 1): a[1] for a in attributes if
+            not (a[0].startswith('__') and a[0].endswith('__') or
+                 sum([(e in a[0]) for e in excludes]))}
+    return attr
+
+
 def cat_list(lst: list):
     w = [chr(i) for i in range(ord(lst[0]), ord(lst[1]) + 1)]
     return w[::-1]
 
 
 class Scheduler(object):
-    def __init__(self, nflights: int, date: datetime = datetime(2010, 6, 15), plotting: bool = False):
+    def __init__(self, nflights: int, date: datetime = datetime(2010, 6, 15), plotting: bool = False,
+                 ac_file: str = r"./programdata/ac.json", terminal_file: str = r"./programdata/terminals.json"):
         self.__date = date
         self.__nflights = nflights
 
@@ -25,11 +35,14 @@ class Scheduler(object):
         self.__tmin = timedelta(minutes=60)
         self.__ttow = timedelta(hours=3)
 
-        self.__terminals = {"INT": {"L": {"num": 4, "cat": ["B", "H"], "dist": 4},
-                                    "S": {"num": 4, "cat": ["B", "G"], "dist": 3}},
-                            "DOM": {"L": {"num": 4, "cat": ["B", "G"], "dist": 3},
-                                    "S": {"num": 6, "cat": ["B", "E"], "dist": 2}},
-                            "BUS": {"B": {"num": 6, "cat": ["A", "G"], "dist": 30}}}
+        with open(terminal_file, 'r') as file:
+            self.__terminals = json.load(file)
+
+        # Aircraft passenger capacity and ac group from:
+        # https://www.dvbbank.com/~/media/Files/D/dvbbank-corp/aviation/dvb-overview-of-commercial-aircraft-2018-2019.pdf
+        with open(ac_file, 'r') as file:
+            self.__ac = json.load(file)
+            self.__ac = {int(key): value for key, value in self.__ac.items()}
 
         self.__prob = {"INT": {1: {"mean_arr": self.get_dt(hours=8, minutes=0), "std_arr": 1 * 60,
                                    "mean_len": timedelta(minutes=1.5 * 60), "std_len": 1 * 60},
@@ -45,23 +58,6 @@ class Scheduler(object):
                     "tow": 0, "pref": 0.3},
             "DOM": {"AC": {1: 0.05, 2: 0.05, 3: 0.05, 4: 0.05, 5: 0.1, 6: 0.2, 7: 0.1, 8: 0.1,
                            9: 0.2, 10: 0.1}, "tzone": {4: 0.6}, "tow": 0, "pref": 0.2}}
-
-        # Aircraft passenger capacity and ac group from:
-        # https://www.dvbbank.com/~/media/Files/D/dvbbank-corp/aviation/dvb-overview-of-commercial-aircraft-2018-2019.pdf
-        self.__ac = {1: {"AC": "Bombardier CRJ700", "cap": 66, "cat": "A"},
-                     2: {"AC": "Embraer ERJ-140", "cap": 44, "cat": "A"},
-                     3: {"AC": "Boeing 717-200", "cap": 106, "cat": "B"},
-                     4: {"AC": "McDonnel Douglas MD-87", "cap": 117, "cat": "B"},
-                     5: {"AC": "Embraer E-190", "cap": 96, "cat": "C"},
-                     6: {"AC": "Boeing 737-500", "cap": 110, "cat": "C"},
-                     7: {"AC": "Airbus A320-200", "cap": 150, "cat": "D"},
-                     8: {"AC": "Boeing 737-900", "cap": 189, "cat": "D"},
-                     9: {"AC": "Airbus A321-200", "cap": 185, "cat": "E"},
-                     10: {"AC": "Airbus A330-300", "cap": 277, "cat": "F"},
-                     11: {"AC": "Boeing 787-900", "cap": 290, "cat": "F"},
-                     12: {"AC": "Boeing 777-300", "cap": 425, "cat": "G"},
-                     13: {"AC": "Boeing 747-8I", "cap": 410, "cat": "H"},
-                     14: {"AC": "Airbus A380-800", "cap": 544, "cat": "H"}}
 
         self.__bays = defaultdict(dict)
         self.__schedule = {}
@@ -190,25 +186,24 @@ class Scheduler(object):
         for flight in self.__schedule:
             if self.__schedule[flight]["ETD"] - self.__schedule[flight]["ETA"] > self.__ttow and \
                     self.__ac[list(self.__ac.keys())[[self.__ac[x]["AC"] for x in
-                    self.__ac].index(self.__schedule[flight]["AC"])]]["cat"] not in ["H", "A"]:
-                    lturns["FULL"][flight] = self.__schedule[flight].copy()
-                    lturns["SPLIT"][flight + "A"] = self.__schedule[flight].copy()
-                    lturns["SPLIT"][flight + "D"] = self.__schedule[flight].copy()
-                    lturns["SPLIT"][flight + "P"] = self.__schedule[flight].copy()
+                                                      self.__ac].index(self.__schedule[flight]["AC"])]]["cat"] not in [
+                "H", "A"]:
+                lturns["FULL"][flight] = self.__schedule[flight].copy()
+                lturns["SPLIT"][flight + "A"] = self.__schedule[flight].copy()
+                lturns["SPLIT"][flight + "D"] = self.__schedule[flight].copy()
+                lturns["SPLIT"][flight + "P"] = self.__schedule[flight].copy()
 
-                    lturns["SPLIT"][flight + "A"]["ETD"] = self.__schedule[flight]["ETA"] + timedelta(minutes=30)
-                    lturns["SPLIT"][flight + "D"]["ETA"] = self.__schedule[flight]["ETD"] - timedelta(minutes=30)
-                    lturns["SPLIT"][flight + "P"]["ETA"] = lturns["SPLIT"][flight + "A"]["ETD"]
-                    lturns["SPLIT"][flight + "P"]["ETD"] = lturns["SPLIT"][flight + "D"]["ETA"]
-                    if "pref" in lturns["SPLIT"][flight + "P"]:
-                        del lturns["SPLIT"][flight + "P"]['pref']
-                    del turns[flight]
+                lturns["SPLIT"][flight + "A"]["ETD"] = self.__schedule[flight]["ETA"] + timedelta(minutes=30)
+                lturns["SPLIT"][flight + "D"]["ETA"] = self.__schedule[flight]["ETD"] - timedelta(minutes=30)
+                lturns["SPLIT"][flight + "P"]["ETA"] = lturns["SPLIT"][flight + "A"]["ETD"]
+                lturns["SPLIT"][flight + "P"]["ETD"] = lturns["SPLIT"][flight + "D"]["ETA"]
+                if "pref" in lturns["SPLIT"][flight + "P"]:
+                    del lturns["SPLIT"][flight + "P"]['pref']
+                del turns[flight]
         return turns, lturns
 
     def return_data(self):
-        attributes = inspect.getmembers(self, lambda a: not (inspect.isroutine(a)))
-        attr = {'_'.join(a[0].split('_')[3:]) : a[1] for a in attributes if not (a[0].startswith('__') and a[0].endswith('__'))}
-        return attr
+        return return_data(self)
 
     def return_turns(self):
         return self.__turns
