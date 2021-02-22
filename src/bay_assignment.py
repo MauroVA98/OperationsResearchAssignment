@@ -5,14 +5,12 @@ Authors: Mauro, Luke   2020
 # Importing modules
 import time
 import os, json
-import inspect
-from collections import defaultdict, ChainMap, Iterable
-from re import Pattern
+from collections import defaultdict, ChainMap
 
 from pulp import LpProblem, LpMinimize, lpSum, LpInteger, LpVariable, LpStatus, value, CPLEX_CMD
 from datetime import datetime, timedelta
 
-from flight_schedule import Scheduler, return_data
+from src.flight_schedule import Scheduler, return_data
 
 def is_jsonable(x):
     try:
@@ -258,22 +256,29 @@ class LPSolver(object):
         # The optimised objective function value is printed to the screen
         print("Objective Function Value = ", value(self.__prob.objective))
 
-    def return_data(self):
+    def return_data(self, *vars):
         attr = return_data(self, 'map')
-        attr['schedule'] = attr['schedule'].return_data()
+        attr['schedule'] = attr['schedule'].return_data()['schedule']
         attr['prob'] = return_data(attr['prob'], custom=False)
         attr['solver'] = return_data(attr['solver'])
-        return attr
+        if len(vars) == 0:
+            return attr
+        else:
+            return {k : v for k, v in attr.items() if k in vars}
 
 
 if __name__ == "__main__":
 
     CPLEX_time = LPSolver(nflights=50, solver=CPLEX_CMD(path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe"))
     remove_clone_logs()
-    data = CPLEX_time.return_data()
-    del CPLEX_time
+    try:
+        os.rename("BayAssignmentProblem.lp", "outputdata/BayAssignmentProblem.lp")
+    except FileExistsError:
+        os.replace("BayAssignmentProblem.lp", "outputdata/BayAssignmentProblem.lp")
 
-    replaced = make_data_serializable(data)
+    data = make_data_serializable(CPLEX_time.return_data(
+        #*['ac', 'bays', 'schedule', 'lturns']
+    ))
 
-    with open('outputdata/file.json', 'w') as file:
-        file.write(json.dumps(replaced))
+    with open(fr'./outputdata/run_{datetime.now().strftime("%Y_%m_%d_%H_%M_%S")}.json', 'w+') as file:
+        file.write(json.dumps(data))
