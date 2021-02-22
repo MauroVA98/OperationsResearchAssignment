@@ -71,7 +71,7 @@ def solve_time(n:int, nflights: int, solver):
 
 class LPSolver(object):
     def __init__(self, nflights: int, solver = None, date: datetime = datetime(2010, 6, 15), tbuf: dict = None,
-                 plotting: bool = False):
+                 plotting: bool = False, adj_file: str = r"./programdata/adj.json", cost_file: str = r"./programdata/costs.json"):
 
         self.__schedule = Scheduler(nflights, date=date, plotting=plotting)
         if tbuf is None:
@@ -96,20 +96,18 @@ class LPSolver(object):
         self.__costs_nobay = {}
 
         # USE .get() to avoid unnecessary adjacency constraints
-        self.__adj = {"INT": {"L": {"L": {"H": ["H", "G"], "G": "H"},
-                                    "S": {"H": ["G", "F"], "G": "G"}},
-                              "S": {"S": {"G": ["G", "F"], "F": "G"}}},
-                      "DOM": {"L": {"L": {"G": ["G", "F"], "F": "G"},
-                                    "S": {"G": "E"}},
-                              "S": {"S": {"E": "E"}}}}
+        with open(adj_file, 'r') as file:
+            self.__adj = json.load(file)
 
         self.__keys_bays = [(ter, k) for ter in self.__bays for k in self.__bays[ter]]
         self.__keys = [(i, ter, k) for i in self.__map_turns for ter in self.__bays for k in self.__bays[ter]]
 
         # get costs matrices for turns and tows for objective function
+        with open(cost_file, 'r') as file:
+            cost_data = json.load(file)
         self.costs_turns()
-        self.costs_tows()
-        self.costs_nobay()
+        self.costs_tows(cost_data['tow'])
+        self.costs_nobay(cost_data['nobay'])
 
         # Creates the 'prob' variable to contain the problem data
         self.__prob = LpProblem("Bay_Assignment", LpMinimize)
@@ -151,15 +149,13 @@ class LPSolver(object):
                 pref = self.__map_turns[i]["pref"]["val"]
                 self.__costs_turns[i][ter_pref][bay_pref] = self.__costs_turns[i][ter_pref][bay_pref] / pref
 
-    def costs_nobay(self):
-        nobay_cat = {"A": 20000, "B": 20000, "C": 50000, "D": 50000, "E": 50000, "F": 70000, "G": 70000, "H": 100000}
+    def costs_nobay(self, nobay_cat):
         for i in self.__turns:
             self.__costs_nobay[i] = nobay_cat[self.ac_data(flight=i)["cat"]]
         for l in self.__lturns["FULL"]:
             self.__costs_nobay[l] = nobay_cat[self.ac_data(flight=l)["cat"]]
 
-    def costs_tows(self):
-        tow_cat = {"A": 100, "B": 100, "C": 200, "D": 200, "E": 200, "F": 400, "G": 400}
+    def costs_tows(self, tow_cat):
         for l in self.__lturns["FULL"]:
             self.__costs_tows[l] = tow_cat[self.ac_data(flight=l)["cat"]]
 
