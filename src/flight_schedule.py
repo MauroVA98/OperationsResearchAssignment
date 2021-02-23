@@ -43,15 +43,16 @@ def cat_list(lst: list):
 class Scheduler(object):
     def __init__(self, nflights: int, date: datetime = datetime(2010, 6, 15), plotting: bool = False,
                  ac_file: str = r"./programdata/ac.json", terminal_file: str = r"./programdata/terminals.json",
-                 feature_file : str = r"./programdata/features.json"):
+                 feature_file : str = r"./programdata/features.json", schedule_file: str = r"./programdata/scheduling.json"):
         self.__date = date
         self.__nflights = nflights
 
-        self.__tstart = self.get_dt(hours=6, minutes=0)
-        self.__tend = self.get_dt(hours=23, minutes=59)
-
-        self.__tmin = timedelta(minutes=60)
-        self.__ttow = timedelta(hours=3)
+        with open(schedule_file, 'r') as file:
+            time_data = json.load(file)
+            self.__tstart = self.get_dt(hours=time_data['tstart'][0], minutes=time_data['tstart'][1])
+            self.__tend = self.get_dt(hours=time_data['tend'][0], minutes=time_data['tend'][1])
+            self.__tmin = timedelta(hours=time_data['tmin'][0], minutes=time_data['tmin'][1])
+            self.__ttow = timedelta(hours=time_data['ttow'][0], minutes=time_data['ttow'][1])
 
         with open(terminal_file, 'r') as file:
             self.__terminals = json.load(file)
@@ -234,4 +235,4 @@ class Scheduler(object):
 
 
 if __name__ == "__main__":
-    ac_schedule = Scheduler(nflights=80, plotting=True)
+    ac_schedule = Scheduler(nflights=200, plotting=True)
