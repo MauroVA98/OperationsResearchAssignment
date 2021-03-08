@@ -1,5 +1,6 @@
 import inspect
 import json
+
 from math import ceil
 from random import choices, gauss
 from collections import defaultdict
@@ -38,6 +39,16 @@ def return_data(obj, *excludes, custom=True):
 def cat_list(lst: list):
     w = [chr(i) for i in range(ord(lst[0]), ord(lst[1]) + 1)]
     return w[::-1]
+
+def minmaxd(data:dict):
+    d = [0, 10]
+    for k in data:
+        for i in data[k]:
+            if d[0] < data[k][i]["dist"] and k != "BUS":
+                d[0] = data[k][i]["dist"]
+            elif d[1] > data[k][i]["dist"] and k != "BUS":
+                d[1] = data[k][i]["dist"]
+    return d
 
 
 class Scheduler(object):
@@ -85,6 +96,8 @@ class Scheduler(object):
 
         self.__turns, self.__lturns = self.pross_schedule()
 
+        self.__costs = self.make_costs()
+
         self.plotter() if plotting else None
 
     def get_dt(self, hours: int, minutes: int):
@@ -93,6 +106,42 @@ class Scheduler(object):
     def ac_data(self, AC: str):
         return self.__ac[
             list(self.__ac.keys())[[self.__ac[x]["AC"] for x in self.__ac].index(AC)]]
+
+    def make_costs(self):
+        ac_cat = list(set(list(self.__ac[ac]["cat"] for ac in self.__ac)))
+        tow_costs = dict.fromkeys(ac_cat, 0)
+        nobay_costs = tow_costs.copy()
+        data = defaultdict(dict)
+
+        max_d, min_d = minmaxd(data=self.__bays)
+        bus_dist = self.__terminals["BUS"]["B"]["dist"]
+        ter_penalty = 1.5*bus_dist/min_d
+
+        for ac in self.__ac:
+            if "cap" not in data[self.__ac[ac]["cat"]]:
+                data[self.__ac[ac]["cat"]]["cap"] = [self.__ac[ac]["cap"]]
+            else:
+                data[self.__ac[ac]["cat"]]["cap"].append(self.__ac[ac]["cap"])
+
+        for ter in self.__weights:
+            for ac in self.__weights[ter]["AC"]:
+                idx_min, idx_max = min(list(self.__bays[ter].keys())), max(list(self.__bays[ter].keys()))
+                if "dist" not in data[self.__ac[ac]["cat"]]:
+                    data[self.__ac[ac]["cat"]]["dist"] = [self.__bays[ter][idx_min]["dist"],
+                                                               self.__bays[ter][idx_max]["dist"]]
+                else:
+                    data[self.__ac[ac]["cat"]]["dist"].extend([self.__bays[ter][idx_min]["dist"],
+                                                                   self.__bays[ter][idx_max]["dist"]])
+
+        for cat in tow_costs:
+            tow_min = max(data[cat]["cap"])*(max(data[cat]["dist"])-min(data[cat]["dist"]))
+            tow_max = min(data[cat]["cap"])*(bus_dist-max(data[cat]["dist"]))
+            assert(tow_max > tow_min)
+            tow_costs[cat] = (tow_max+tow_min)/2
+
+            nobay_costs[cat] = 1.1*max(data[cat]["cap"])*13*ter_penalty*max_d
+            assert(tow_costs[cat] < nobay_costs[cat])
+        return tow_costs, nobay_costs, ter_penalty
 
     def get_bays(self):
         for ter in list(self.__terminals.keys()):
@@ -118,7 +167,7 @@ class Scheduler(object):
         for n in range(1, self.__nflights + 1):
             vals = list(self.__prob.keys())
             weights = list(self.__prob[k]['weight'] for k in self.__prob.keys())
-            tzone = choices(vals,weights)[0]
+            tzone = choices(vals, weights)[0]
             ter = self.__prob[tzone]['type']
             plane = choices(list(self.__weights[ter]["AC"].keys()), self.__weights[ter]["AC"].values())[0]
             arr, dep = self.make_t(mean_arr=self.__prob[tzone]["mean_arr"],
@@ -233,6 +282,9 @@ class Scheduler(object):
     def return_termianls(self):
         return self.__terminals
 
+    def return_cost_data(self):
+        return self.__costs
+
 
 if __name__ == "__main__":
-    ac_schedule = Scheduler(nflights=200, plotting=True)
+    ac_schedule = Scheduler(nflights=100, plotting=True)

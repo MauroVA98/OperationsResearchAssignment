@@ -66,8 +66,7 @@ def solve_time(n: int, nflights: int, solver):
 
 class LPSolver(object):
     def __init__(self, nflights: int, solver=None, date: datetime = datetime(2010, 6, 15), tbuf: dict = None,
-                 plotting: bool = False, adj_file: str = r"./programdata/adj.json",
-                 cost_file: str = r"./programdata/costs.json", schedule: Scheduler = None):
+                 plotting: bool = False, adj_file: str = r"./programdata/adj.json", schedule: Scheduler = None):
 
         self.__schedule = Scheduler(nflights, date=date, plotting=plotting) if schedule is None else schedule
         if tbuf is None:
@@ -81,7 +80,8 @@ class LPSolver(object):
 
         self.__bays = self.__schedule.return_bays()
         self.__terminals = self.__schedule.return_termianls()
-        self.__ter_penalty = 100  # penalty multiplier for inappropriate terminal
+
+        self.__tow_data, self.__nobay_data, self.__ter_penalty = self.__schedule.return_cost_data()
 
         self.__turns = self.__schedule.return_turns()
         self.__lturns = self.__schedule.return_lturns()
@@ -100,12 +100,10 @@ class LPSolver(object):
         self.__keys_bays = [(ter, k) for ter in self.__bays for k in self.__bays[ter]]
         self.__keys = [(i, ter, k) for i in self.__map_turns for ter in self.__bays for k in self.__bays[ter]]
 
-        # get costs matrices for turns and tows for objective function
-        with open(cost_file, 'r') as file:
-            cost_data = json.load(file)
+        # assign tow & unassigned bay costs to turns
         self.costs_turns()
-        self.costs_tows(cost_data['tow'])
-        self.costs_nobay(cost_data['nobay'])
+        self.costs_tows(self.__tow_data)
+        self.costs_nobay(self.__nobay_data)
 
         # Creates the 'prob' variable to contain the problem data
         self.__prob = LpProblem("Bay_Assignment", LpMinimize)
@@ -167,7 +165,7 @@ class LPSolver(object):
         self.asg_turns()
         self.asg_lturns()
         self.tow_const()
-        #self.adj_const()
+        self.adj_const()
         self.time_const()
 
     def asg_turns(self):

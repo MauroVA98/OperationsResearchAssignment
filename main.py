@@ -48,12 +48,12 @@ def main(n_flights : int = 50,
 
 
 if __name__ == "__main__":
-    N = 50
-    ac_schedule = Scheduler(nflights=N, plotting=True)
+    N = 100
+    ac_schedule = Scheduler(nflights=N, plotting=False)
     log, raw_log, solver_time = main(
         schedule=ac_schedule,
         n_flights=N,
-        logging_data=['ac', 'bays', 'schedule', 'turns', 'lturns', 'date_format', 'variables']
+        # logging_data=['ac', 'bays', 'schedule', 'turns', 'lturns', 'date_format', 'variables']
     )
     bins = extract_occupations_per_bay(log)
     make_hbar(log)
