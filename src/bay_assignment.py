@@ -127,6 +127,7 @@ class LPSolver(object):
         return self.__ac[
             list(self.__ac.keys())[[self.__ac[x]["AC"] for x in self.__ac].index(self.__map_turns[flight]["AC"])]]
 
+
     def costs_turns(self):
         for i in self.__map_turns:
             for ter, k in self.__keys_bays:
@@ -165,7 +166,7 @@ class LPSolver(object):
         self.asg_turns()
         self.asg_lturns()
         self.tow_const()
-        self.adj_const()
+        # self.adj_const()
         self.time_const()
 
     def asg_turns(self):

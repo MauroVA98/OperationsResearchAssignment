@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import defaultdict
 import json, os
 import datetime as dt
 
@@ -11,9 +12,9 @@ def extract_occupations_per_bay(data: dict):
         for k2, v2 in v1.items():
             gates.append(f'{k1}_{k2}')
 
-    distr = {g : [] for g in gates}
+    distr = {g: [] for g in gates}
 
-    for i in range(1, data['schedule']['nflights']+1):
+    for i in range(1, data['schedule']['nflights'] + 1):
         istr = str(i)
         if istr in data['variables']['y'].keys():
             continue
@@ -43,17 +44,16 @@ def extract_occupations_per_bay(data: dict):
 
 
 def make_hbar(data: dict):
-
     bins = extract_occupations_per_bay(data)
 
     t0 = dt.datetime.strptime(data['schedule']['tstart'], data['date_format'])
     t1 = dt.datetime.strptime(data['schedule']['tend'], data['date_format'])
 
     x_step = dt.timedelta(hours=1, minutes=0)
-    nxbins = round((t1-t0)/x_step)
+    nxbins = round((t1 - t0) / x_step)
     ylabels = list(bins.keys())
-    xlabels = [t0 + x_step*i for i in range(nxbins+1)]
-    xrange  = [t0 + dt.timedelta(minutes=1)*i for i in range((t1-t0).seconds // 60)]
+    xlabels = [t0 + x_step * i for i in range(nxbins + 1)]
+    xrange = [t0 + dt.timedelta(minutes=1) * i for i in range((t1 - t0).seconds // 60)]
 
     xdata = [
         [(d[2] - d[1]).seconds for d in bin] for gate, bin in bins.items()
@@ -83,8 +83,8 @@ def make_hbar(data: dict):
                 return i
         return None
 
-    plane_cat_map = {ac['AC'] : ac['cat'] for ac in data['ac'].values()}
-    cat_count = {ac['cat'] : 0 for ac in data['ac'].values()}
+    plane_cat_map = {ac['AC']: ac['cat'] for ac in data['ac'].values()}
+    cat_count = {ac['cat']: 0 for ac in data['ac'].values()}
 
     for i, (gate, bin) in enumerate(bins.items()):
         for j, item in enumerate(bin):
@@ -96,12 +96,12 @@ def make_hbar(data: dict):
             c = plane_cat_map[plane]
             colour = colour_gradient(get_cat_id(c))
             if cat_count[c] == 0:
-                ax.barh(ylabels, w_vector, left=l_vector, color=colour, linewidth=1, edgecolor = (0,0,0), label=c)
+                ax.barh(ylabels, w_vector, left=l_vector, color=colour, linewidth=1, edgecolor=(0, 0, 0), label=c)
             else:
-                ax.barh(ylabels, w_vector, left=l_vector, color=colour, linewidth=1, edgecolor = (0,0,0))
+                ax.barh(ylabels, w_vector, left=l_vector, color=colour, linewidth=1, edgecolor=(0, 0, 0))
 
             r, g, b, _ = colour
-            center = l_vector + w_vector/2
+            center = l_vector + w_vector / 2
             text_color = 'white' if r * g * b < 0.5 else 'darkgrey'
             ax.text(sum(center), ylabels.index(gate), str(item[0]), ha='center', va='center',
                     color=text_color)
@@ -115,3 +115,79 @@ def make_hbar(data: dict):
     ax.legend(handles, labels, ncol=len(cat), bbox_to_anchor=(0, 1),
               loc='lower left')
     plt.show()
+
+
+def make_ac_bar(data: dict):
+    ac_counts = defaultdict(dict)
+    ac_cat = sorted(list(set(list(data["ac"][ac]["cat"] for ac in data["ac"]))))
+    features = {"A": {"hatch": None, "color": "white"}, "B": {"hatch": "/", "color": "white"},
+                "C": {"hatch": "\\", "color": "white"}, "D": {"hatch": "|", "color": "white"},
+                "E": {"hatch": "+", "color": "white"}, "F": {"hatch": "x", "color": "white"},
+                "G": {"hatch": "o", "color": "white"}, "H": {"hatch": ".", "color": "white"}}
+
+    def get_cat(ac: str):
+        for idx in data["ac"]:
+            if data["ac"][idx]["AC"] == ac:
+                return data["ac"][idx]["cat"]
+            else:
+                pass
+
+    for cat in ac_cat:
+        for turn in data["schedule"]["schedule"].values():
+            if cat == get_cat(turn["AC"]) and turn["AC"] not in ac_counts:
+                ac_counts[turn["AC"]]["cnt"] = 1
+                ac_counts[turn["AC"]]["cat"] = cat
+            elif cat == get_cat(turn["AC"]):
+                ac_counts[turn["AC"]]["cnt"] += 1
+
+    fig, ax = plt.subplots()
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    plt.gcf().subplots_adjust(bottom=0.15)
+    fig.autofmt_xdate(rotation=45)
+    temp = 0
+    for ac in ac_counts:
+        if temp != ac_counts[ac]["cat"]:
+            ax.bar(ac, ac_counts[ac]["cnt"], hatch=features[ac_counts[ac]["cat"]]["hatch"],
+                   color=features[ac_counts[ac]["cat"]]["color"], label=ac_counts[ac]["cat"], edgecolor="black")
+        else:
+            ax.bar(ac, ac_counts[ac]["cnt"], hatch=features[ac_counts[ac]["cat"]]["hatch"],
+                   color=features[ac_counts[ac]["cat"]]["color"], edgecolor="black")
+        temp = ac_counts[ac]["cat"]
+    ax.set_ylabel('Amount of Aircraft', fontsize=12)
+    ax.set_xlabel("Aircraft", fontsize=12)
+    ax.grid(True)
+    plt.legend(title="    Aircraft \n Categories", loc='upper right')
+    fig.show()
+
+
+def make_len_bar(data: dict):
+    ac_counts = {}
+    lengths = []
+    t_width = 30
+    form = data['date_format']
+
+    for turn in data["schedule"]["schedule"].values():
+        lengths.append((dt.datetime.strptime(turn["ETD"], form) - dt.datetime.strptime(turn["ETA"], form)).seconds)
+    i = 0
+    while max(lengths) > i * t_width * 60:
+        i += 1
+        s = sum(l >= ((i - 1) * t_width * 60) for l in lengths) - sum(l >= (i * t_width * 60) for l in lengths)
+        if s > 0:
+            ac_counts[i * t_width] = s
+
+    fig, ax = plt.subplots()
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    ax.bar(range(len(ac_counts)), list(ac_counts.values()))
+    labels = ["%d:%02d - %d:%02d" % (int((key - t_width) / 60), int(key - t_width - int((key - t_width) / 60) * 60),
+                                     int(key / 60), int(key - int(key / 60) * 60)) for key in ac_counts]
+    plt.xticks(range(len(ac_counts)), labels)
+    ax.set_ylabel('Amount of Turns', fontsize=12)
+    ax.set_xlabel('Duration [hours]', fontsize=12)
+    ax.grid(True)
+    fig.show()
+
+
+def plotter(data: dict, hbar: bool = False, ac_bar: bool = False, len_bar: bool = False):
+    if hbar: make_hbar(data)
+    if ac_bar: make_ac_bar(data)
+    if len_bar: make_len_bar(data)
