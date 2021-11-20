@@ -235,4 +235,4 @@ class Scheduler(object):
 
 
 if __name__ == "__main__":
-    ac_schedule = Scheduler(nflights=200, plotting=True)
+    ac_schedule = Scheduler(nflights=80, plotting=True)

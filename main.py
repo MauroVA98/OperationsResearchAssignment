@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List
 import time
+import random
 
 from pulp import CPLEX_CMD
 
@@ -48,12 +49,22 @@ def main(n_flights : int = 50,
 
 
 if __name__ == "__main__":
-    N = 50
+    # 2021, 299, 999, 9999,
+    random.seed(9999)
+    N = 70
     ac_schedule = Scheduler(nflights=N, plotting=True)
+    # CPLEX_time = LPSolver(
+    #     nflights=70,
+    #     schedule=ac_schedule,
+    #     solver=CPLEX_CMD(
+    #         path=r"C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64\cplex.exe",
+    #         msg=False,
+    #     )
+    # )
     log, raw_log, solver_time = main(
         schedule=ac_schedule,
         n_flights=N,
-        logging_data=['ac', 'bays', 'schedule', 'turns', 'lturns', 'date_format', 'variables']
+        logging_data=['ac', 'bays', 'schedule', 'turns', 'lturns', 'date_format', 'variables', 'problem']
     )
     bins = extract_occupations_per_bay(log)
-    make_hbar(log)
+    plotter(data=log, hbar=True, ac_bar=False, len_bar=False)

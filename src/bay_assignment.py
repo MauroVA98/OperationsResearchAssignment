@@ -167,7 +167,7 @@ class LPSolver(object):
         self.asg_turns()
         self.asg_lturns()
         self.tow_const()
-        #self.adj_const()
+        self.adj_const()
         self.time_const()
 
     def asg_turns(self):
@@ -224,21 +224,38 @@ class LPSolver(object):
                 self.__prob += lpSum(self.__var_tow[l]) == 1, "TowConstFlight%s" % l
 
     def adj_const(self):
-        for idx, i1 in enumerate(list(self.__map_turns.keys())):
-            arr1, dep1 = self.get_tbuf(flight=i1)
-            for ter, k in self.__keys_bays:
-                for i2 in list(self.__map_turns.keys())[idx + 1:]:
-                    arr2, dep2 = self.get_tbuf(flight=i2)
-                    if not flight_check(flights=[i1, i2]) and ((arr1 <= arr2 <= dep1 or arr1 <= dep2 <= dep1) or
-                                                               (arr2 <= arr1 and dep2 >= dep1)):
-                        if self.ac_data(flight=i1)["cat"] in self.__bays[ter][k]['cat'] and \
-                                self.ac_data(flight=i2)["cat"] in self.__bays[ter].get(k + 2, {}).get('cat', []) and \
-                                self.ac_data(flight=i2)["cat"] in self.__adj.get(ter, {}).get(
-                            self.__bays[ter][k]["size"], {}) \
-                                .get(self.__bays[ter].get(k + 2, {}).get("size"), {}).get(
-                            self.ac_data(flight=i1)["cat"], []):
-                            self.__prob += lpSum(self.__var_turn[i1][ter][k] + self.__var_turn[i2][ter][k + 2]) == 0, \
-                                           "AdjConstTer%sBay%sFlights%s&%s" % (ter, k, i1, i2)
+        for ter, k in self.__keys_bays:
+            if (ter, k+2) in self.__keys_bays:
+                for idx, i1 in enumerate(list(self.__map_turns.keys())):
+                    arr1, dep1 = self.get_tbuf(flight=i1)
+                    if self.ac_data(flight=i1)["cat"] in self.__bays[ter][k]['cat']:
+                        for i2 in list(self.__map_turns.keys()):
+                            arr2, dep2 = self.get_tbuf(flight=i2)
+                            if self.ac_data(flight=i2)["cat"] in self.__bays[ter][k+2]['cat'] \
+                                and not flight_check(flights=[i1, i2]) \
+                                and ((arr1 <= arr2 <= dep1 or arr1 <= dep2 <= dep1) or (arr2 <= arr1 and dep2 >= dep1)):
+                                if self.ac_data(flight=i2)["cat"] in self.__adj.get(ter, {}).get(
+                                        self.__bays[ter][k]["size"], {}) \
+                                    .get(self.__bays[ter].get(k + 2, {}).get("size"), {}).get(
+                                    self.ac_data(flight=i1)["cat"], []):
+                                    self.__prob += lpSum(self.__var_turn[i1][ter][k] + self.__var_turn[i2][ter][k + 2]) <= 1, \
+                                                   "AdjConstTer%sBay%sFlights%s&%s" % (ter, k, i1, i2)
+
+        # for idx, i1 in enumerate(list(self.__map_turns.keys())):
+        #     arr1, dep1 = self.get_tbuf(flight=i1)
+        #     for ter, k in self.__keys_bays:
+        #         for i2 in list(self.__map_turns.keys())[idx + 1:]:
+        #             arr2, dep2 = self.get_tbuf(flight=i2)
+        #             if not flight_check(flights=[i1, i2]) and ((arr1 <= arr2 <= dep1 or arr1 <= dep2 <= dep1) or
+        #                                                        (arr2 <= arr1 and dep2 >= dep1)):
+        #                 if self.ac_data(flight=i1)["cat"] in self.__bays[ter][k]['cat'] and \
+        #                         self.ac_data(flight=i2)["cat"] in self.__bays[ter].get(k + 2, {}).get('cat', []) and \
+        #                         self.ac_data(flight=i2)["cat"] in self.__adj.get(ter, {}).get(
+        #                     self.__bays[ter][k]["size"], {}) \
+        #                         .get(self.__bays[ter].get(k + 2, {}).get("size"), {}).get(
+        #                     self.ac_data(flight=i1)["cat"], []):
+        #                     self.__prob += lpSum(self.__var_turn[i1][ter][k] + self.__var_turn[i2][ter][k + 2]) == 0, \
+        #                                    "AdjConstTer%sBay%sFlights%s&%s" % (ter, k, i1, i2)
 
     def writeLP(self):
         # The problem data is written to an .lp file
@@ -280,4 +297,3 @@ class LPSolver(object):
             return attr
         else:
             return {k: v for k, v in attr.items() if k in vars}
-
