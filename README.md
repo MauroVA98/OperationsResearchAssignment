@@ -15,12 +15,14 @@ This repository contains the code for the Operations Research (AE4441) Assignmen
 # Usage Guide
 1. Replace the LPSolver path with your CPLEX installation in main.py
 2. Run main.py
-3. You can change the seed and/or the amount of flights
-4. You can plot the simulation results using the plotter method:
+3. You can plot the simulation results using the plotter method:
 - len_bar = bar chart of turn durations
 - ac_bar = bar chart of aircraft types
 - h_bar = turn and bay visualization
-5. You can further tune the probabilities of the turn schedule and bay configutation in the programdata folder
+
+# Changing Simulation Parameters
+1. You can change the seed and/or the amount of flights
+2. You can further tune the probabilities of the turn schedule and bay configutation in the programdata folder
 - ac.json - Aircraft Names, Capacities and Categories
 - adj.json - Adjacency Contraint
 - costs.json - Costs of the Objective Function
