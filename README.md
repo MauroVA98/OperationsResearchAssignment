@@ -13,7 +13,7 @@ This repository contains the code for the Operations Research (AE4441) Assignmen
 3. A CPLEX Studio Installation
 
 # Usage Guide
-1. Replace the LPSolver path with your CPLEX installation
+1. Replace the LPSolver path with your CPLEX installation in main.py
 2. Run main.py
 3. You can change the seed and/or the amount of flights
 4. You can plot the simulation results using the plotter method:
